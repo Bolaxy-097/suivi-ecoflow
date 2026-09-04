@@ -112,7 +112,8 @@ def main():
 
     # Mode Charge Rapide (Fast Charge)
     slow_chg_watts = data.get("inv.cfgSlowChgWatts", 0)
-    fast_mode = True if (not ac_plugged or input_watts > slow_chg_watts) else False
+    net_charge_watts = max(0, input_watts - output_watts)
+    fast_mode = True if (not ac_plugged or net_charge_watts > (slow_chg_watts + 150)) else False
 
     # Solaire & USB
     solar_watts = data.get("mppt.inWatts", 0) or data.get("mppt.pwrIn", 0)
