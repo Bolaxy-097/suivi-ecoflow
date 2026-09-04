@@ -111,9 +111,17 @@ def main():
     ac_plugged = (in_volt > 50) or (input_watts > 10) or (data.get("pd.iconAcIn", 0) == 1)
 
     # Mode Charge Rapide (Fast Charge)
-    slow_chg_watts = data.get("inv.cfgSlowChgWatts", 0)
-    net_charge_watts = max(0, input_watts - output_watts)
-    fast_mode = True if (not ac_plugged or net_charge_watts > (slow_chg_watts + 150)) else False
+    # Mode Charge Rapide (Fast Charge)
+soc = data.get("bmsMaster.soc", 0)
+slow_chg_watts = data.get("inv.cfgSlowChgWatts", 1000)
+net_charge_watts = max(0, input_watts - output_watts)
+
+if not ac_plugged:
+    fast_mode = False
+elif soc >= 100:
+    fast_mode = True
+else:
+    fast_mode = net_charge_watts > (slow_chg_watts + 150)
 
     # Solaire & USB
     solar_watts = data.get("mppt.inWatts", 0) or data.get("mppt.pwrIn", 0)
