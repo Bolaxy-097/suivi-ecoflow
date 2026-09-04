@@ -5,9 +5,10 @@ import hmac
 import hashlib
 import requests
 from datetime import datetime
+from zoneinfo import ZoneInfo
 
 # ============================================================
-# CONFIGURATION DEPUIS LES VARIABLES D'ENVIRONNEMENT
+# CONFIGURATION
 # ============================================================
 ACCESS_KEY = os.getenv("ECOFLOW_ACCESS_KEY")
 SECRET_KEY = os.getenv("ECOFLOW_SECRET_KEY")
@@ -17,7 +18,7 @@ GOOGLE_WEBHOOK_URL = os.getenv("GOOGLE_SHEET_WEBHOOK_URL")
 BASE_URL = "https://api-e.ecoflow.com"
 
 # ============================================================
-# FONCTION DE SIGNATURE
+# FONCTIONS API
 # ============================================================
 def hmac_sha256(text, secret):
     return hmac.new(
@@ -56,56 +57,65 @@ def ecoflow_get(endpoint, params=None):
         res = requests.get(url, headers=headers, params=params, timeout=20)
         return res.json() if res.status_code == 200 else None
     except Exception as e:
-        print("Erreur de connexion API EcoFlow:", e)
+        print("Erreur API EcoFlow :", e)
         return None
 
 # ============================================================
-# RÉCUPÉRATION ET EXTRACTION DES DONNÉES
+# MAIN
 # ============================================================
 def main():
-    # 1. Vérifier si l'appareil est en ligne
+    # 1. État en ligne
     device_list_res = ecoflow_get("/iot-open/sign/device/list")
     is_online = False
     if device_list_res and str(device_list_res.get("code")) == "0":
-        devices = device_list_res.get("data", [])
-        for dev in devices:
+        for dev in device_list_res.get("data", []):
             if dev.get("sn") == SN:
                 is_online = (dev.get("online") == 1)
 
-    # 2. Récupérer l'ensemble des quotas
+    # 2. Récupération des données
     quota_res = ecoflow_get("/iot-open/sign/device/quota/all", {"sn": SN})
-    
     if not quota_res or str(quota_res.get("code")) != "0":
-        print("❌ Impossible de récupérer les métriques.")
+        print("❌ Impossible de récupérer les données.")
         return
 
     data = quota_res.get("data", {})
 
-    # Extraction des valeurs
+    # Batterie, Température et Cycles
     soc = data.get("bmsMaster.soc", 0)
     temp = data.get("bmsMaster.temp", 0)
     cycles = data.get("bmsMaster.cycles", 0)
-    input_watts = data.get("bmsMaster.inputWatts", 0)
-    output_watts = data.get("bmsMaster.outputWatts", 0)
 
-    # Tension Entrée / Sortie AC (converties de mV ou V selon le champ)
-    raw_in_volt = data.get("inv.inVolt", 0)
-    raw_out_volt = data.get("inv.outVolt", 0) or data.get("inv.invOutVolt", 0)
-    in_volt = round(raw_in_volt / 1000.0, 1) if raw_in_volt > 1000 else raw_in_volt
-    out_volt = round(raw_out_volt / 1000.0, 1) if raw_out_volt > 1000 else raw_out_volt
+    # Puissances d'entrée et de sortie (Somme PD ou BMS/INV)
+    input_watts = data.get("pd.wattsInSum")
+    if input_watts is None or input_watts == 0:
+        input_watts = data.get("bmsMaster.inputWatts", 0) or data.get("inv.inWatts", 0)
 
-    # États logiques
-    ac_plugged = (in_volt > 50) or (data.get("pd.iconAcIn", 0) == 1)
-    inverter_on = (data.get("inv.cfgAcEnabled", 0) == 1) or (data.get("pd.iconAcOut", 0) == 1)
-    
-    # Mode charge rapide (si charge lente non configurée)
+    output_watts = data.get("pd.wattsOutSum")
+    if output_watts is None or output_watts == 0:
+        output_watts = data.get("bmsMaster.outputWatts", 0) or data.get("inv.outWatts", 0)
+
+    # Tensions Entrée / Sortie AC
+    raw_in_volt = data.get("inv.inVol", 0) or data.get("inv.acInVol", 0)
+    raw_out_volt = data.get("inv.invOutVol", 0) or data.get("inv.outVol", 0)
+
+    in_volt = round(raw_in_volt / 1000.0, 1) if raw_in_volt > 1000 else float(raw_in_volt)
+    out_volt = round(raw_out_volt / 1000.0, 1) if raw_out_volt > 1000 else float(raw_out_volt)
+
+    # Onduleur AC
+    inverter_on = (data.get("inv.cfgAcEnabled", 0) == 1) or (data.get("pd.iconAcOut", 0) == 1) or (output_watts > 0)
+    if inverter_on and out_volt == 0:
+        cfg_out_v = data.get("inv.cfgAcOutVoltage", 230000)
+        out_volt = round(cfg_out_v / 1000.0, 1) if cfg_out_v > 1000 else float(cfg_out_v)
+
+    # Secteur Branché
+    ac_plugged = (in_volt > 50) or (input_watts > 10) or (data.get("pd.iconAcIn", 0) == 1)
+
+    # Mode Charge Rapide (Fast Charge)
     slow_chg_watts = data.get("inv.cfgSlowChgWatts", 0)
-    fast_mode = (slow_chg_watts == 0) or (data.get("inv.cfgFastChgWatts", 0) > 0)
+    fast_mode = (slow_chg_watts == 0) or (data.get("inv.fastChgMode", 0) == 1) or (input_watts > slow_chg_watts and slow_chg_watts > 0)
 
-    # Puissance des panneaux solaires
-    solar_watts = data.get("mppt.inWatts", 0)
-
-    # Puissance cumulée des ports USB (USB Standard + QC + Type-C)
+    # Solaire & USB
+    solar_watts = data.get("mppt.inWatts", 0) or data.get("mppt.pwrIn", 0)
     usb_watts = (
         data.get("pd.usb1Watts", 0) +
         data.get("pd.usb2Watts", 0) +
@@ -115,10 +125,9 @@ def main():
         data.get("pd.typec2Watts", 0)
     )
 
-    # Date et heure au format local
-    now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    # Heure locale Kinshasa (UTC+1)
+    now_str = datetime.now(ZoneInfo("Africa/Kinshasa")).strftime("%Y-%m-%d %H:%M:%S")
 
-    # Payload à envoyer à Google Sheets
     payload = {
         "datetime": now_str,
         "online": is_online,
@@ -136,11 +145,9 @@ def main():
         "cycles": cycles
     }
 
-    print("Envoi des données vers Google Sheets...")
-    print(payload)
-
-    response = requests.post(GOOGLE_WEBHOOK_URL, json=payload, timeout=15)
-    print("Réponse Google Sheets :", response.text)
+    print("Envoi vers Google Sheets :", payload)
+    res = requests.post(GOOGLE_WEBHOOK_URL, json=payload, timeout=15)
+    print("Réponse Google Sheets :", res.text)
 
 if __name__ == "__main__":
     main()
