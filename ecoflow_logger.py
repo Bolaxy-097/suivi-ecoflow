@@ -113,7 +113,8 @@ def main():
     # Mode Charge Rapide (Fast Charge)
     slow_chg_watts = data.get("inv.cfgSlowChgWatts", 0)
     net_charge_watts = max(0, input_watts - output_watts)
-    fast_mode = True if (not ac_plugged or net_charge_watts > (slow_chg_watts + 150)) else False
+    #fast_mode = True if (not ac_plugged or net_charge_watts > (slow_chg_watts + 150)) else False
+    fast_mode = ac_plugged and (net_charge_watts > (slow_chg_watts + 150))
     # Onduleur AC (Détection stricte du bouton AC)
     ac_enabled = data.get("inv.cfgAcEnabled", 0) == 1
     ac_watts = data.get("inv.outputWatts", 0) or data.get("inv.invOutWatts", 0)
