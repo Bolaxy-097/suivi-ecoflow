@@ -102,11 +102,10 @@ def main():
     out_volt = round(raw_out_volt / 1000.0, 1) if raw_out_volt > 1000 else float(raw_out_volt)
 
     # Onduleur AC
-    # Onduleur AC (Détection stricte du bouton AC)
-    ac_enabled = data.get("inv.cfgAcEnabled", 0) == 1
-    ac_watts = data.get("inv.outputWatts", 0) or data.get("inv.invOutWatts", 0)
-
-    inverter_on = ac_enabled or (ac_watts > 5)
+    inverter_on = (data.get("inv.cfgAcEnabled", 0) == 1) or (data.get("pd.iconAcOut", 0) == 1) or (output_watts > 0)
+    if inverter_on and out_volt == 0:
+        cfg_out_v = data.get("inv.cfgAcOutVoltage", 230000)
+        out_volt = round(cfg_out_v / 1000.0, 1) if cfg_out_v > 1000 else float(cfg_out_v)
 
     # Secteur Branché
     ac_plugged = (in_volt > 50) or (input_watts > 10) or (data.get("pd.iconAcIn", 0) == 1)
