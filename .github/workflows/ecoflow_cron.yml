@@ -2,9 +2,8 @@ name: EcoFlow Status Tracker
 
 on:
   schedule:
-    # S'exécute toutes les 30 minutes (ex: 00:00, 00:30, 01:00...)
     - cron: '*/30 * * * *'
-  workflow_dispatch: # Permet de lancer le script manuellement depuis GitHub
+  workflow_dispatch:
 
 jobs:
   run-logger:
@@ -27,7 +26,7 @@ jobs:
       - name: Exécuter le script d'enregistrement
         env:
           ECOFLOW_ACCESS_KEY: ${{ secrets.ECOFLOW_ACCESS_KEY }}
-          SECRET_KEY_ECOFLOW: ${{ secrets.ECOFLOW_SECRET_KEY }}
+          ECOFLOW_SECRET_KEY: ${{ secrets.ECOFLOW_SECRET_KEY }}
           ECOFLOW_SN: ${{ secrets.ECOFLOW_SN }}
           GOOGLE_SHEET_WEBHOOK_URL: ${{ secrets.GOOGLE_SHEET_WEBHOOK_URL }}
         run: python ecoflow_logger.py
